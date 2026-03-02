@@ -31,6 +31,7 @@ _cmd_http_help() {
   echo ""
 }
 
+
 cmd_http() {
   local mode="auto"
   local path="/"
@@ -120,7 +121,7 @@ cmd_http() {
   fi
 
   local writeout
-  writeout=$'\n'": curl_http_code=%{http_code} remote_ip=%{remote_ip} local_ip=%{local_ip} time_total=%{time_total} num_redirects=%{num_redirects}"$'\n'
+  writeout=$'\n'"curl_http_code=%{http_code} remote_ip=%{remote_ip} local_ip=%{local_ip} time_total=%{time_total} num_redirects=%{num_redirects}"$'\n'
 
   _probe_one_url() {
     local url="$1"
