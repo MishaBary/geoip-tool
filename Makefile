@@ -7,7 +7,7 @@ install:
 	install -d "$(SHAREDIR)/bin"
 	install -d "$(SHAREDIR)/lib"
 	install -m 0755 bin/geoip "$(SHAREDIR)/bin/geoip"
-	install -m 0644 lib/geoip_core.sh lib/geoip_lookup.sh lib/geoip_http.sh lib/cmd_banner.sh "$(SHAREDIR)/lib/"
+	install -m 0644 lib/geoip_core.sh lib/geoip_lookup.sh lib/geoip_http.sh lib/geoip_reverse.sh lib/geoip_nmap.sh lib/geoip_abuseipdb.sh lib/geoip_whois.sh lib/geoip_dns.sh lib/geoip_recon.sh "$(SHAREDIR)/lib/"
 	printf '%s\n' '#!/usr/bin/env bash' > "$(BINDIR)/geoip"
 	printf '%s\n' 'exec "$(SHAREDIR)/bin/geoip" "$$@"' >> "$(BINDIR)/geoip"
 	chmod 0755 "$(BINDIR)/geoip"

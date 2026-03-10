@@ -2,51 +2,33 @@
 set -euo pipefail
 
 _cmd_http_help() {
-  local fg=$'\033[38;5;117m'
-  local blue=$'\033[0;34m'
-  local gray=$'\033[38;5;245m'
-  local reset=$'\033[0m'
+  _banner
+  printf "  ${C_DIM}Пробинг HTTP-методов на целевом хосте${C_RESET}\n"
 
-  local banner_bottom
+  _h "Использование"
+  _exm "geoip http [опции] <IP|host[:port]|http(s)://host[:port][/base]>"
 
-  cat <<'EOF'
-  geoip http [опции] <IP|host[:port]|http(s)://host[:port][/base]>
+  _h "Опции"
+  _opt "--auto" "Сначала https, если не получилось — http"
+  _opt "--https" "Принудительно https"
+  _opt "--http" "Принудительно http"
+  _opt "--path /путь" "Путь запроса (по умолчанию /)"
+  _opt "--methods CSV" "Список методов, напр. GET,HEAD,OPTIONS"
+  _opt "--aggressive" "GET, HEAD, OPTIONS, POST, PUT, PATCH, DELETE, TRACE"
+  _opt "--ports CSV" "Порты для проверки, напр. 80,443,8080,8443"
+  _opt "--timeout SEC" "Общий таймаут (по умолчанию 10)"
+  _opt "--connect-timeout SEC" "Таймаут соединения (по умолчанию 5)"
+  _opt "--follow" "Следовать редиректам (-L)"
+  _opt "--insecure" "Разрешить небезопасный TLS (-k)"
+  _opt "--all-headers" "Печатать все заголовки ответа"
+  _opt "-h, --help" "Справка"
 
-${blue}Флаги:${reset}
-  --auto                  Сначала https, если не получилось — http
-  --https                 Принудительно https
-  --http                  Принудительно http
-  --path /путь            Путь запроса (по умолчанию /)
-  --methods CSV           Список методов, напр. GET, HEAD, OPTIONS
-  --aggressive            Использовать GET, HEAD, OPTIONS, POST, PUT, PATCH, DELETE, TRACE
-  --timeout SEC           Общий таймаут (по умолчанию 10)
-  --connect-timeout SEC   Таймаут соединения (по умолчанию 5)
-  --follow                Следовать редиректам (-L)
-  --insecure              Разрешить небезопасный TLS (-k)
-  --all-headers           Печатать все заголовки ответа
-  -h, --help              Справка
-
-${blue}Примеры:${reset}
-  geoip http example.com
-  geoip http --aggressive example.com
-  geoip http example.com --https --path /admin --aggressive
-  geoip http https://example.com --methods GET,HEAD
-EOF
-
-  banner_bottom=$'
-                                                                      
- @@@@@@  @@@@@@@  @@@@@@@   @@@@@@ @@@@@@@@  @@@@@@@ @@@@@@@  @@@@@@  
-@@!  @@@ @@!  @@@ @@!  @@@ !@@     @@!      !@@        @!!   @@!  @@@ 
-@!@!@!@! @!@@!@!  @!@@!@!   !@@!!  @!!!:!   !@!        @!!   @!@!@!@! 
-!!:  !!! !!:      !!:          !:! !!:      :!!        !!:   !!:  !!! 
- :   : :  :        :       ::.: :  : :: ::   :: :: :    :     :   : : 
-                                                                      
-                                                                      
-                                                     Sic Parvis Magna'
-
-  printf '%s\n' "$banner_bottom" \
-    | sed "s/^/${fg}/; s/$/${reset}/"
-
+  _h "Примеры"
+  _exm "geoip http example.com"
+  _exm "geoip http --aggressive example.com"
+  _exm "geoip http --https --path /admin --aggressive example.com"
+  _exm "geoip http --ports 80,443,8080 example.com"
+  echo ""
 }
 
 
@@ -60,6 +42,7 @@ cmd_http() {
   local insecure="0"
   local aggressive="0"
   local all_headers="0"
+  local custom_ports=""
 
   local target=""
 
@@ -80,6 +63,7 @@ cmd_http() {
       --insecure) insecure="1"; shift ;;
       --aggressive) aggressive="1"; shift ;;
       --all-headers) all_headers="1"; shift ;;
+      --ports) shift; custom_ports="${1:-}"; shift ;;
       --)
         shift
         break
@@ -143,8 +127,8 @@ cmd_http() {
     local url="$1"
     local methods_csv="$2"
 
-    echo "[*] Проверка HTTP-методов: $url"
-    echo "[*] methods=$methods_csv timeout=${timeout}s connect-timeout=${ctimeout}s follow=$follow insecure=$insecure"
+    printf '%b\n' "${C_BOLD}[*] Проверка HTTP-методов: $url${C_RESET}"
+    printf '%b\n' "${C_DIM}[*] methods=$methods_csv timeout=${timeout}s connect-timeout=${ctimeout}s follow=$follow insecure=$insecure${C_RESET}"
     echo
 
     IFS=',' read -r -a mlist <<< "$methods_csv"
@@ -153,12 +137,17 @@ cmd_http() {
       method="$(echo "$method" | tr -d '[:space:]')"
       [[ -z "$method" ]] && continue
 
-      echo "===== $method ====="
+      printf '%b\n' "${C_BOLD}===== $method =====${C_RESET}"
 
       local tmp_headers rc out
       tmp_headers="$(mktemp)"
 
-      local curl_args=(-sS -o /dev/null -D "$tmp_headers" -w "$writeout" -X "$method" --max-time "$timeout" --connect-timeout "$ctimeout")
+      local curl_args=(-sS -D "$tmp_headers" -w "$writeout" --max-time "$timeout" --connect-timeout "$ctimeout")
+      if [[ "$method" == "HEAD" ]]; then
+        curl_args+=(-I -o /dev/null)
+      else
+        curl_args+=(-o /dev/null -X "$method")
+      fi
       [[ "$follow" == "1" ]] && curl_args+=(-L)
       [[ "$insecure" == "1" ]] && curl_args+=(-k)
 
@@ -175,7 +164,19 @@ cmd_http() {
       h="$(tr -d '\r' < "$tmp_headers")"
 
       if [[ -n "$h" ]]; then
-        echo "$h" | head -n 1
+        local status_line
+        status_line=$(echo "$h" | head -n 1)
+        local code
+        code=$(echo "$status_line" | awk '{print $2}')
+        if [[ "$code" =~ ^2 ]]; then
+          printf '%b\n' "${C_GREEN}${status_line}${C_RESET}"
+        elif [[ "$code" =~ ^4 ]]; then
+          printf '%b\n' "${C_YELLOW}${status_line}${C_RESET}"
+        elif [[ "$code" =~ ^5 ]]; then
+          printf '%b\n' "${C_RED}${status_line}${C_RESET}"
+        else
+          echo "$status_line"
+        fi
 
         if [[ "$all_headers" == "1" ]]; then
           echo "$h" | sed '1d'
@@ -191,8 +192,8 @@ cmd_http() {
       fi
 
       if [[ $rc -ne 0 ]]; then
-        echo "Ошибка curl (exit code $rc)"
-        echo "curl stderr: $out"
+        printf '%b\n' "${C_RED}Ошибка curl (exit code $rc)${C_RESET}"
+        printf '%b\n' "${C_RED}curl stderr: $out${C_RESET}"
       else
         echo "$out"
       fi
@@ -202,36 +203,87 @@ cmd_http() {
     done
   }
 
-  case "$mode" in
-    fixed)
-      _probe_one_url "$url" "$methods"
-      ;;
-    http)
-      _probe_one_url "$url_http" "$methods"
-      ;;
-    https)
-      _probe_one_url "$url_https" "$methods"
-      ;;
-    auto)
-      local rc
-      set +e
-      if [[ "$insecure" == "1" ]]; then
-        curl -sS -o /dev/null -I --max-time "$timeout" --connect-timeout "$ctimeout" -k "$url_https" >/dev/null 2>&1
-      else
-        curl -sS -o /dev/null -I --max-time "$timeout" --connect-timeout "$ctimeout" "$url_https" >/dev/null 2>&1
-      fi
-      rc=$?
-      set -e
+  _build_url_with_port() {
+    local scheme="$1" host="$2" port="$3" p="$4"
+    if [[ "$scheme" == "http" && "$port" == "80" ]] || \
+       [[ "$scheme" == "https" && "$port" == "443" ]]; then
+      echo "${scheme}://${host}${p}"
+    else
+      echo "${scheme}://${host}:${port}${p}"
+    fi
+  }
 
-      if [[ $rc -eq 0 ]]; then
-        _probe_one_url "$url_https" "$methods"
-      else
-        _probe_one_url "$url_http" "$methods"
+  _probe_auto() {
+    local url_h="$1" url_hs="$2"
+    local rc
+    set +e
+    if [[ "$insecure" == "1" ]]; then
+      curl -sS -o /dev/null -I --max-time "$timeout" --connect-timeout "$ctimeout" -k "$url_hs" >/dev/null 2>&1
+    else
+      curl -sS -o /dev/null -I --max-time "$timeout" --connect-timeout "$ctimeout" "$url_hs" >/dev/null 2>&1
+    fi
+    rc=$?
+    set -e
+    if [[ $rc -eq 0 ]]; then
+      _probe_one_url "$url_hs" "$methods"
+    else
+      _probe_one_url "$url_h" "$methods"
+    fi
+  }
+
+  if [[ -n "$custom_ports" ]]; then
+    # Extract bare hostname (strip any existing :port)
+    local bare_host="$target"
+    bare_host="${bare_host%%:*}"
+
+    IFS=',' read -r -a port_list <<< "$custom_ports"
+    for port in "${port_list[@]}"; do
+      port="$(echo "$port" | tr -d '[:space:]')"
+      [[ -z "$port" ]] && continue
+      if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+        >&2 echo "WARNING: некорректный порт '$port', пропускаем"
+        continue
       fi
-      ;;
-    *)
-      echo "Внутренняя ошибка: неизвестный режим '$mode'"
-      return 2
-      ;;
-  esac
+
+      echo ""
+      printf '%b\n' "${C_BOLD}========== Порт $port ==========${C_RESET}"
+
+      case "$mode" in
+        fixed)
+          local scheme="${base_url%%://*}"
+          _probe_one_url "$(_build_url_with_port "$scheme" "$bare_host" "$port" "$path")" "$methods"
+          ;;
+        http)
+          _probe_one_url "$(_build_url_with_port "http" "$bare_host" "$port" "$path")" "$methods"
+          ;;
+        https)
+          _probe_one_url "$(_build_url_with_port "https" "$bare_host" "$port" "$path")" "$methods"
+          ;;
+        auto)
+          _probe_auto \
+            "$(_build_url_with_port "http"  "$bare_host" "$port" "$path")" \
+            "$(_build_url_with_port "https" "$bare_host" "$port" "$path")"
+          ;;
+      esac
+    done
+  else
+    case "$mode" in
+      fixed)
+        _probe_one_url "$url" "$methods"
+        ;;
+      http)
+        _probe_one_url "$url_http" "$methods"
+        ;;
+      https)
+        _probe_one_url "$url_https" "$methods"
+        ;;
+      auto)
+        _probe_auto "$url_http" "$url_https"
+        ;;
+      *)
+        echo "Внутренняя ошибка: неизвестный режим '$mode'"
+        return 2
+        ;;
+    esac
+  fi
 }
